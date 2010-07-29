@@ -28,6 +28,7 @@
 
 -export([start_link/2,
          start/2,
+         stop/1,
          ping/1,
          get_client_id/1,
          set_client_id/2,
@@ -81,6 +82,11 @@ start_link(Address, Port) ->
 -spec start(address(), portnum()) -> {ok, pid()} | {error, term()}.
 start(Address, Port) ->
     gen_server:start(?MODULE, [Address, Port], []).
+
+%% @doc Closing connection to riak server.
+-spec stop(pid()) -> ok.
+stop(Pid) ->
+    gen_server:call(Pid, stop).
 
 %% @doc Ping the server
 -spec ping(pid()) -> ok | {error, term()}.
@@ -301,7 +307,9 @@ handle_call({req, Req, Ctx}, From, State) when State#state.req =/= undefined ->
 handle_call({req, Req}, From, State) ->
     {noreply, send_request(Req, undefined, From, State)};
 handle_call({req, Req, Ctx}, From, State) ->
-    {noreply, send_request(Req, Ctx, From, State)}.
+    {noreply, send_request(Req, Ctx, From, State)};
+handle_call(stop, _, State) ->
+    {stop, normal, ok, State}.
 
 %% @private
 handle_info({tcp_closed, _Socket}, State) ->
@@ -340,7 +348,11 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 %% @private
-terminate(_Reason, _State) -> ok.
+terminate(_Reason, State) ->
+    gen_tcp:close(State#state.sock),
+    [gen_server:reply(From, {error, connection_closed})
+     || {_Req, _Ctx, From} <- queue:to_list(State#state.queue)],
+    ok.
 
 %% @private
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
